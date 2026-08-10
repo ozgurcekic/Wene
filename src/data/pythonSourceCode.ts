@@ -41,21 +41,16 @@ export const PYTHON_SOURCE_FILES: PythonFileSpec[] = [
     category: "root",
     content: `# Python Core & Utilities
 python-dotenv>=1.0.0
-PyExifTool>=0.5.0
+piexif>=1.1.3
 numpy>=1.24.0
 
 # Image Processing & Computer Vision
 opencv-python>=4.8.0
 Pillow>=10.0.0
-
-# Embedded Local AI Engines (No External Servers Required)
 mediapipe>=0.10.0
-ultralytics>=8.0.0
-onnxruntime>=1.15.0
-llama-cpp-python>=0.2.0
 
-# Desktop UI Framework
-PyQt6>=6.5.0
+# Embedded Local AI Engines (Self-Contained Offline Models)
+llama-cpp-python>=0.2.0
 `
   },
   {
@@ -67,9 +62,33 @@ PyQt6>=6.5.0
 LOCAL_VISION_MODEL_PATH=./local_ai/models/moondream2-q4.gguf
 MODEL_THREADS=4
 
-# Application Settings
+# Application Directory & Logging Settings
+SOURCE_DIR=./sample_input
 DEFAULT_EXPORT_DIR=./export
 LOG_LEVEL=INFO
+`
+  },
+  {
+    path: "config/settings.py",
+    title: "Application Settings Configuration",
+    language: "python",
+    category: "config",
+    content: `import os
+from pathlib import Path
+
+
+class Settings:
+    """
+    Application-level settings and environment configuration management.
+    Reads from environment variables with safe defaults.
+    """
+
+    def __init__(self):
+        self.SOURCE_DIR: str = os.getenv("SOURCE_DIR", "./sample_input")
+        self.DEFAULT_EXPORT_DIR: str = os.getenv("DEFAULT_EXPORT_DIR", "./export")
+        self.LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+        self.LOCAL_VISION_MODEL_PATH: str = os.getenv("LOCAL_VISION_MODEL_PATH", "./local_ai/models/moondream2-q4.gguf")
+        self.MODEL_THREADS: int = int(os.getenv("MODEL_THREADS", "4"))
 `
   },
   {
@@ -95,29 +114,36 @@ from modules.metadata_tagger import MetadataTaggerModule
 from modules.exporter import ExporterModule
 from config.settings import Settings
 
-logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s")
-logger = logging.getLogger("WeneMain")
-
 
 def build_default_pipeline() -> PipelineEngine:
     """Builds and registers all processing modules in order."""
     engine = PipelineEngine()
     engine.add_module(QualityAnalyzerModule())
+    engine.add_module(BaseTaggerModule())
     engine.add_module(ImageEnhancerModule())
     engine.add_module(FaceDetectorModule())
-    engine.add_module(BaseTaggerModule())
     engine.add_module(MetadataTaggerModule())
     engine.add_module(ExporterModule())
     return engine
 
 
 def main():
-    logger.info("Initializing Wêne Standalone Engine v1.0...")
-    
     settings = Settings()
-    source_dir = Path("./sample_input").resolve()
-    export_dir = Path(settings.DEFAULT_EXPORT_DIR).resolve()
     
+    # Configure logging dynamically from settings.LOG_LEVEL
+    log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
+    logging.basicConfig(level=log_level, format="[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s")
+    logger = logging.getLogger("WeneMain")
+
+    logger.info("Initializing Wêne Standalone Engine v1.0...")
+
+    source_dir = Path(settings.SOURCE_DIR).resolve()
+    export_dir = Path(settings.DEFAULT_EXPORT_DIR).resolve()
+
+    # Ensure source directory exists for sample execution
+    source_dir.mkdir(parents=True, exist_ok=True)
+    export_dir.mkdir(parents=True, exist_ok=True)
+
     try:
         SafetyChecker.validate_directories(str(source_dir), str(export_dir))
         logger.info("Safety check passed: Export directory is isolated and non-destructive.")
@@ -127,6 +153,24 @@ def main():
 
     pipeline = build_default_pipeline()
     logger.info(f"Pipeline ready with {len(pipeline.modules)} modules.")
+
+    # Locate sample images in the source directory
+    extensions = ("*.jpg", "*.jpeg", "*.png", "*.webp", "*.JPG", "*.PNG")
+    image_files = []
+    for ext in extensions:
+        image_files.extend(source_dir.glob(ext))
+
+    if not image_files:
+        logger.info(f"No input images found in {source_dir}. Place images there and run again.")
+        return
+
+    logger.info(f"Found {len(image_files)} image(s) to process.")
+    for img_path in image_files:
+        logger.info(f"Processing: {img_path.name}...")
+        initial_context = {"export_dir": str(export_dir)}
+        result = pipeline.run(str(img_path), initial_context)
+        exported = result.get("exported_file", "None")
+        logger.info(f"Successfully processed {img_path.name} -> Exported: {exported}")
 
 
 if __name__ == "__main__":
@@ -208,8 +252,11 @@ class SafetyChecker:
     title: "Pipeline Execution Engine",
     language: "python",
     category: "core",
-    content: `from typing import List, Dict, Any
+    content: `import logging
+from typing import List, Dict, Any
 from modules.base_module import BaseModule
+
+logger = logging.getLogger("PipelineEngine")
 
 
 class PipelineEngine:
@@ -235,7 +282,7 @@ class PipelineEngine:
                 context = module.process(image_path, context)
             except Exception as e:
                 context[f"{module.name}_error"] = str(e)
-                print(f"[{module.name}] Error processing {image_path}: {e}")
+                logger.error(f"[{module.name}] Error processing {image_path}: {e}")
                 
         return context
 `
@@ -264,7 +311,15 @@ class QualityAnalyzerModule(BaseModule):
         super().__init__("QualityAnalyzer")
 
     def process(self, image_path: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        image = cv2.imread(image_path)
+        # Check if RAM buffer is available from enhancer or load safely from disk
+        image = context.get("enhanced_ram_buffer")
+        if image is None:
+            try:
+                img_bytes = np.fromfile(image_path, dtype=np.uint8)
+                image = cv2.imdecode(img_bytes, cv2.IMREAD_COLOR)
+            except Exception:
+                image = cv2.imread(image_path)
+
         if image is None:
             raise ValueError(f"Could not load image at {image_path}")
 
@@ -299,7 +354,9 @@ class QualityAnalyzerModule(BaseModule):
             "overexposed_percent": round(overexposed, 2),
             "stock_compliance_score": stock_score,
             "adobe_stock_pass": stock_score >= 80,
-            "shutterstock_pass": stock_score >= 75
+            "shutterstock_pass": stock_score >= 75,
+            "freepik_pass": stock_score >= 70,
+            "getty_images_pass": stock_score >= 85
         }
         return context
 `
@@ -318,6 +375,7 @@ from modules.base_module import BaseModule
 class ImageEnhancerModule(BaseModule):
     """
     Non-destructive image enhancement performed strictly in RAM buffers.
+    Uses float32 precision for clipping-free color math & unsharp masking.
     Applies exposure, saturation, contrast, unsharp mask, and denoise filters.
     """
 
@@ -325,7 +383,13 @@ class ImageEnhancerModule(BaseModule):
         super().__init__("ImageEnhancer")
 
     def process(self, image_path: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        image = cv2.imread(image_path)
+        # Load image with Unicode/non-ASCII safe np.fromfile
+        try:
+            img_bytes = np.fromfile(image_path, dtype=np.uint8)
+            image = cv2.imdecode(img_bytes, cv2.IMREAD_COLOR)
+        except Exception:
+            image = cv2.imread(image_path)
+
         if image is None:
             return context
 
@@ -340,27 +404,35 @@ class ImageEnhancerModule(BaseModule):
 
         buffer = image.astype(np.float32)
 
-        # Contrast & Exposure Adjustment
-        contrast_factor = (params["contrast"] + 100) / 100.0
-        exposure_shift = params["exposure"] * 1.5
+        # Contrast & Exposure Adjustment in float32 space
+        contrast_factor = (params.get("contrast", 0) + 100) / 100.0
+        exposure_shift = params.get("exposure", 0) * 1.5
         buffer = (buffer - 128.0) * contrast_factor + 128.0 + exposure_shift
-        buffer = np.clip(buffer, 0, 255).astype(np.uint8)
 
-        # Saturation in HSV space
-        if params["saturation"] != 0:
-            hsv = cv2.cvtColor(buffer, cv2.COLOR_BGR2HSV).astype(np.float32)
+        # Saturation in HSV float32 space
+        if params.get("saturation", 0) != 0:
+            buffer_clipped = np.clip(buffer, 0, 255).astype(np.float32)
+            hsv = cv2.cvtColor(buffer_clipped, cv2.COLOR_BGR2HSV)
             sat_factor = (params["saturation"] + 100) / 100.0
             hsv[:, :, 1] = np.clip(hsv[:, :, 1] * sat_factor, 0, 255)
-            buffer = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+            buffer = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
-        # Unsharp Mask (Sharpness)
-        if params["sharpness"] > 0:
+        # Unsharp Mask (Sharpness) in float32
+        if params.get("sharpness", 0) > 0:
             gaussian = cv2.GaussianBlur(buffer, (0, 0), 2.0)
             weight = params["sharpness"] / 50.0
             buffer = cv2.addWeighted(buffer, 1.0 + weight, gaussian, -weight, 0)
 
+        # Clip and convert to uint8 for Denoise
+        buffer_uint8 = np.clip(buffer, 0, 255).astype(np.uint8)
+
+        # Denoise (Fast Non-Local Means Denoising on uint8)
+        if params.get("denoise", 0) > 0:
+            h_val = float(params["denoise"] / 5.0)
+            buffer_uint8 = cv2.fastNlMeansDenoisingColored(buffer_uint8, None, h_val, h_val, 7, 21)
+
         # Store enhanced numpy buffer in RAM context
-        context["enhanced_ram_buffer"] = buffer
+        context["enhanced_ram_buffer"] = buffer_uint8
         return context
 `
   },
@@ -370,43 +442,117 @@ class ImageEnhancerModule(BaseModule):
     language: "python",
     category: "modules",
     content: `import cv2
+import logging
+import numpy as np
 from typing import Dict, Any
 from modules.base_module import BaseModule
+
+logger = logging.getLogger("FaceDetector")
 
 
 class FaceDetectorModule(BaseModule):
     """
-    Offline identification of human faces using local MediaPipe / OpenCV Cascade models.
+    Offline identification of human faces using local MediaPipe Face Detection
+    with OpenCV Haar Cascade as a secondary fallback mechanism.
     Flags has_human_face = True and sets model release warnings for microstock compliance.
     """
 
     def __init__(self):
         super().__init__("FaceDetector")
-        # Load bundled OpenCV Haar Cascade or MediaPipe detector
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        self.mp_available = False
+
+        try:
+            import mediapipe as mp
+            self.mp_available = True
+            logger.info("MediaPipe Face Detection engine initialized")
+        except Exception as e:
+            logger.warning(f"MediaPipe not available, defaulting to OpenCV Haar Cascade: {e}")
 
     def process(self, image_path: str, context: Dict[str, Any]) -> Dict[str, Any]:
         image = context.get("enhanced_ram_buffer")
         if image is None:
-            image = cv2.imread(image_path)
+            try:
+                img_bytes = np.fromfile(image_path, dtype=np.uint8)
+                image = cv2.imdecode(img_bytes, cv2.IMREAD_COLOR)
+            except Exception:
+                image = cv2.imread(image_path)
 
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+        if image is None:
+            context["face_analysis"] = {
+                "has_human_face": False,
+                "face_count": 0,
+                "faces_bounding_boxes": [],
+                "model_release_required": False,
+                "privacyRiskLevel": "None",
+                "compliance_flag": "CLEAR"
+            }
+            return context
 
-        has_faces = len(faces) > 0
         detected_list = []
+        h_img, w_img = image.shape[:2]
 
-        for (x, y, w, h) in faces:
-            detected_list.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
+        # Primary: MediaPipe Face Detection with context manager resource cleanup
+        if self.mp_available:
+            try:
+                import mediapipe as mp
+                with mp.solutions.face_detection.FaceDetection(min_detection_confidence=0.5) as detector:
+                    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                    results = detector.process(rgb_image)
+                    if results.detections:
+                        for detection in results.detections:
+                            bbox = detection.location_data.relative_bounding_box
+                            x = int(bbox.xmin * w_img)
+                            y = int(bbox.ymin * h_img)
+                            w = int(bbox.width * w_img)
+                            h = int(bbox.height * h_img)
+                            detected_list.append({"x": max(0, x), "y": max(0, y), "w": w, "h": h})
+            except Exception as e:
+                logger.warning(f"MediaPipe processing error, using OpenCV fallback: {e}")
+
+        # Fallback: OpenCV Haar Cascade
+        if not detected_list:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+            for (x, y, w, h) in faces:
+                detected_list.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
+
+        has_faces = len(detected_list) > 0
 
         context["face_analysis"] = {
             "has_human_face": has_faces,
-            "face_count": len(faces),
+            "face_count": len(detected_list),
             "faces_bounding_boxes": detected_list,
             "model_release_required": has_faces,
+            "privacyRiskLevel": "High" if has_faces else "None",
             "compliance_flag": "MODEL_RELEASE_REQUIRED" if has_faces else "CLEAR"
         }
 
+        return context
+`
+  },
+  {
+    path: "modules/base_tagger.py",
+    title: "Base Keyword & Category Tagger",
+    language: "python",
+    category: "modules",
+    content: `from typing import Dict, Any
+from modules.base_module import BaseModule
+
+
+class BaseTaggerModule(BaseModule):
+    """
+    Standard Base Tagger module for initial category and core taxonomy setup.
+    """
+
+    def __init__(self):
+        super().__init__("BaseTagger")
+
+    def process(self, image_path: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        context["category"] = context.get("category", "General Commercial")
+        context["base_keywords"] = [
+            "microstock", "commercial", "high resolution", "stock photo", "photography"
+        ]
         return context
 `
   },
@@ -415,52 +561,140 @@ class FaceDetectorModule(BaseModule):
     title: "Embedded Local LLM Metadata Generator",
     language: "python",
     category: "modules",
-    content: `from typing import Dict, Any
+    content: `import os
+import re
+import json
+import logging
+from pathlib import Path
+from typing import Dict, Any
 from modules.base_module import BaseModule
+
+logger = logging.getLogger("MetadataTagger")
 
 
 class MetadataTaggerModule(BaseModule):
     """
-    Local GGUF LLM Tagger using llama-cpp-python.
+    Local GGUF LLM Tagger using llama-cpp-python with structured JSON prompt execution.
     Generates stock-compliant English Title (<=80 chars), commercial description,
     and 30-50 high-ranking microstock search keywords.
     """
 
     def __init__(self):
         super().__init__("MetadataTagger")
+        self.model_path = os.getenv("LOCAL_VISION_MODEL_PATH", "./local_ai/models/moondream2-q4.gguf")
+        self.llm_engine = None
+
+        if Path(self.model_path).exists():
+            try:
+                from llama_cpp import Llama
+                self.llm_engine = Llama(model_path=self.model_path, n_threads=4, verbose=False)
+                logger.info(f"Loaded local GGUF model from {self.model_path}")
+            except Exception as e:
+                logger.warning(f"GGUF model found at {self.model_path} but could not initialize Llama: {e}")
 
     def process(self, image_path: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        # Simulated local GGUF model execution in pipeline context
+        category = context.get("category", "Commercial Subject")
+        quality = context.get("quality", {})
+        score = quality.get("stock_compliance_score", 85)
+        faces = context.get("face_analysis", {})
+        has_face = faces.get("has_human_face", False)
+
+        file_stem = Path(image_path).stem.replace("_", " ").replace("-", " ").title()
+
+        face_count = faces.get("face_count", 0)
+
+        # 1. Execute actual llama_cpp model if loaded
+        if self.llm_engine is not None:
+            try:
+                prompt = (
+                    f"Task: Generate microstock SEO metadata in JSON.\n"
+                    f"Subject: {file_stem}, Category: {category}, Has Human Face: {has_face} (Count: {face_count}), Stock Quality Score: {score}/100.\n"
+                    f"Return JSON strictly with format:\n"
+                    f'{{"title": "title under 80 chars", "description": "detailed text", "keywords": ["kw1", "kw2"]}}'
+                )
+                response = self.llm_engine(prompt=prompt, max_tokens=256, temperature=0.3)
+                text = response["choices"][0]["text"].strip()
+                
+                json_match = re.search(r'\{.*\}', text, re.DOTALL)
+                if json_match:
+                    parsed = json.loads(json_match.group(0))
+                else:
+                    parsed = json.loads(text)
+
+                title = parsed.get("title", f"{file_stem} Commercial Photography")[:80]
+                description = parsed.get("description", f"High quality commercial stock image of {file_stem.lower()}.")
+                keywords = parsed.get("keywords", ["stock photo", "commercial", "photography"])
+
+                context["seo_metadata"] = {
+                    "title": title,
+                    "description": description,
+                    "keywords": keywords,
+                    "category": category
+                }
+                return context
+            except Exception as e:
+                logger.warning(f"Llama execution fallback: {e}")
+
+        # 2. Context-Aware Dynamic NLP Generation (Safe Offline Fallback)
+        subject_title = f"{file_stem} - Commercial Stock Photo"
+        if has_face:
+            subject_title = f"Portrait Shot - {file_stem} Commercial Studio Photo"
+
+        if len(subject_title) > 80:
+            subject_title = subject_title[:77] + "..."
+
+        description = (
+            f"Professional high-resolution stock image depicting {file_stem.lower()}. "
+            f"Features sharp focus, vibrant natural lighting, and commercial composition. "
+            f"Verified stock quality compliance score: {score}/100."
+        )
+
+        base_keywords = [
+            "microstock", "commercial", "high resolution", "stock photo", "photography",
+            "professional", "composition", "lighting", "marketing", "advertisement",
+            "publishing", "editorial", "adobe stock", "shutterstock", "freepik",
+            "getty images", "vibrant colors", "sharp focus", "depth of field", "studio"
+        ]
+
+        custom_words = [word.lower() for word in file_stem.split() if len(word) > 2]
+        if has_face:
+            custom_words.extend(["portrait", "human", "model", "person", "lifestyle", "expression"])
+
+        combined_keywords = list(dict.fromkeys(base_keywords + custom_words))
+
         context["seo_metadata"] = {
-            "title": "Professional Commercial Stock Photo of " + context.get("category", "Subject"),
-            "description": "High resolution stock photography featuring detailed subjects, clear composition, and commercial lighting.",
-            "keywords": [
-                "stock photo", "commercial", "high resolution", "professional", "isolated",
-                "clean background", "composition", "lighting", "marketing", "advertisement",
-                "publishing", "editorial", "microstock", "adobe stock", "shutterstock",
-                "freepik", "getty images", "vibrant colors", "sharp focus", "depth of field"
-            ],
-            "category": "Commercial & Advertising"
+            "title": subject_title,
+            "description": description,
+            "keywords": combined_keywords,
+            "category": category
         }
+
         return context
 `
   },
   {
     path: "modules/exporter.py",
-    title: "Lossless ExifTool Batch Exporter",
+    title: "Pure Python EXIF & XMP Metadata Batch Exporter",
     language: "python",
     category: "modules",
     content: `import os
 import cv2
+import logging
+import piexif
+import numpy as np
 from pathlib import Path
 from typing import Dict, Any
+from xml.sax.saxutils import escape
 from modules.base_module import BaseModule
+
+logger = logging.getLogger("Exporter")
 
 
 class ExporterModule(BaseModule):
     """
-    Saves processed RAM buffer to export directory and embeds metadata into EXIF/IPTC/XMP
-    headers losslessly using PyExifTool without re-encoding pixels.
+    Saves processed RAM buffer to export directory using Unicode-safe file streams,
+    embeds metadata into EXIF (piexif), and generates Adobe Stock / Lightroom compliant
+    XMP sidecar files for maximum agency acceptance.
     """
 
     def __init__(self):
@@ -475,9 +709,64 @@ class ExporterModule(BaseModule):
         out_path = export_dir / out_filename
 
         buffer = context.get("enhanced_ram_buffer")
+        if buffer is None:
+            # Fallback: read original
+            try:
+                img_bytes = np.fromfile(image_path, dtype=np.uint8)
+                buffer = cv2.imdecode(img_bytes, cv2.IMREAD_COLOR)
+            except Exception:
+                buffer = cv2.imread(image_path)
+
         if buffer is not None:
-            cv2.imwrite(str(out_path), buffer, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-        
+            # Unicode-safe image write using cv2.imencode + tofile
+            success, encoded_img = cv2.imencode('.jpg', buffer, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+            if success:
+                encoded_img.tofile(str(out_path))
+
+        # Extract SEO metadata
+        seo = context.get("seo_metadata", {})
+        title = seo.get("title", "")
+        description = seo.get("description", "")
+        keywords_list = seo.get("keywords", [])
+        keywords_str = ", ".join(keywords_list)
+
+        # 1. Pure Python EXIF metadata injection via piexif
+        try:
+            exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
+            if title or description:
+                desc_text = description if description else title
+                exif_dict["0th"][piexif.ImageIFD.ImageDescription] = desc_text.encode("utf-8")
+                exif_dict["0th"][piexif.ImageIFD.DocumentName] = title.encode("utf-8")
+                # Windows XP Title & Keywords tags (UCS-2 LE)
+                exif_dict["0th"][0x9c9b] = title.encode("utf-16le")
+                if keywords_str:
+                    exif_dict["0th"][0x9c9e] = keywords_str.encode("utf-16le")
+
+            exif_bytes = piexif.dump(exif_dict)
+            piexif.insert(exif_bytes, str(out_path))
+        except Exception as e:
+            logger.warning(f"EXIF embedding note: {e}")
+
+        # 2. XMP Sidecar Generation for Adobe Stock & Lightroom
+        try:
+            xmp_path = out_path.with_suffix(".xmp")
+            keywords_xml = "".join([f"<rdf:li>{escape(kw)}</rdf:li>" for kw in keywords_list])
+            title_esc = escape(title)
+            desc_esc = escape(description)
+            xmp_content = f"""<x:xmpmeta xmlns:x="adobe:ns:meta/">
+  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+    <rdf:Description rdf:about=""
+        xmlns:dc="http://purl.org/dc/elements/1.1/">
+      <dc:title><rdf:Alt><rdf:li xml:lang="x-default">{title_esc}</rdf:li></rdf:Alt></dc:title>
+      <dc:description><rdf:Alt><rdf:li xml:lang="x-default">{desc_esc}</rdf:li></rdf:Alt></dc:description>
+      <dc:subject><rdf:Bag>{keywords_xml}</rdf:Bag></dc:subject>
+    </rdf:Description>
+  </rdf:RDF>
+</x:xmpmeta>"""
+            xmp_path.write_text(xmp_content, encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"XMP sidecar generation note: {e}")
+
         context["exported_file"] = str(out_path)
         return context
 `
