@@ -1,0 +1,6 @@
+{
+  "name": "Wêne - Microstock AI Photo Studio",
+  "description": "Professional stock photography quality scorer, non-destructive canvas enhancer, face privacy detector, and automated AI SEO tagger for microstock agencies.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
