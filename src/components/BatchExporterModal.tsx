@@ -41,17 +41,45 @@ export const BatchExporterModal: React.FC<BatchExporterModalProps> = ({
         const progress = Math.round(((i + 1) / photos.length) * 80) + 10;
         setExportProgress(progress);
 
-        // Sanitize output filename
+        // Sanitize output filename with global regex replacement
         const baseName = photo.filename.replace(/\.[^/.]+$/, "");
+        const formattedTitle = (photo.metadata.title || "photo").toLowerCase().replace(/[^a-z0-9]/g, "_");
         const formattedName = namingPattern
-          .replace("{filename}", baseName)
-          .replace("{title}", (photo.metadata.title || "photo").toLowerCase().replace(/[^a-z0-9]/g, "_")) + ".jpg";
+          .replace(/{filename}/g, baseName)
+          .replace(/{title}/g, formattedTitle) + ".jpg";
 
-        // Fetch / Convert canvas image buffer
+        // Fetch & re-encode image with selected JPEG compression quality
         const imgUrl = photo.enhancedCanvasUrl || photo.originalUrl;
-        const res = await fetch(imgUrl);
-        const blob = await res.blob();
-        exportFolder.file(formattedName, blob);
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = imgUrl;
+
+        await new Promise((resolve) => {
+          img.onload = resolve;
+          img.onerror = resolve;
+        });
+
+        let fileBlob: Blob;
+        if (img.width > 0 && img.height > 0) {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(img, 0, 0);
+            fileBlob = await new Promise<Blob>((res) => {
+              canvas.toBlob((b) => res(b || new Blob()), "image/jpeg", quality / 100);
+            });
+          } else {
+            const res = await fetch(imgUrl);
+            fileBlob = await res.blob();
+          }
+        } else {
+          const res = await fetch(imgUrl);
+          fileBlob = await res.blob();
+        }
+
+        exportFolder.file(formattedName, fileBlob);
 
         // Add sidecar JSON if checked
         if (includeJSONSidecar) {

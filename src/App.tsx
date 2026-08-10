@@ -165,15 +165,13 @@ export default function App() {
     });
   };
 
-  // Batch Auto-Tag All Photos with AI
+  // Batch Auto-Tag All Photos with AI (Parallel Promise.all Execution)
   const handleBatchAITagging = async () => {
     if (allPhotos.length === 0) return;
     setIsGeneratingAI(true);
 
     try {
-      const updatedList = [...allPhotos];
-      for (let i = 0; i < updatedList.length; i++) {
-        const photo = updatedList[i];
+      const promises = allPhotos.map(async (photo) => {
         try {
           const res = await fetch("/api/generate-metadata", {
             method: "POST",
@@ -187,7 +185,7 @@ export default function App() {
 
           if (res.ok) {
             const data = await res.json();
-            updatedList[i] = {
+            return {
               ...photo,
               metadata: {
                 title: data.title || photo.metadata.title,
@@ -203,7 +201,10 @@ export default function App() {
         } catch (e) {
           console.error(`Failed AI tag for photo ${photo.filename}`, e);
         }
-      }
+        return photo;
+      });
+
+      const updatedList = await Promise.all(promises);
 
       setAllPhotos(updatedList);
       if (activePhoto) {

@@ -19,44 +19,46 @@ export const Header: React.FC<HeaderProps> = ({
   photosCount
 }) => {
   return (
-    <header id="wene-app-header" className="bg-slate-900 border-b border-slate-800 text-slate-100 sticky top-0 z-40 backdrop-blur-md bg-opacity-95 shadow-md">
+    <header id="wene-app-header" className="bg-black/80 border-b border-white/10 text-white sticky top-0 z-40 backdrop-blur-md shadow-2xl">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         
         {/* Brand & Logo */}
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 via-orange-500 to-rose-500 flex items-center justify-center text-white shadow-lg shadow-orange-500/20">
+          <div className="w-9 h-9 rounded bg-orange-500 text-black flex items-center justify-center font-bold shadow-lg shadow-orange-500/20">
             <Camera className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <h1 className="text-xl font-bold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
+              <h1 className="text-lg font-bold tracking-tight text-white">
                 WÊNE
               </h1>
-              <span className="px-2 py-0.5 text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full">
+              <span className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-orange-500/10 text-orange-400 border border-orange-500/20 rounded">
                 Microstock AI Studio
               </span>
             </div>
-            <p className="text-xs text-slate-400 hidden sm:block">
+            <p className="text-[11px] text-white/50 hidden sm:block">
               Zero-Dependency Standalone Engine & Photo Quality Manager
             </p>
           </div>
         </div>
 
-        {/* View Switcher Tabs */}
-        <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800">
+        {/* View Switcher Tabs - Prominent & Clearly Visible */}
+        <div className="flex items-center bg-black/60 p-1 rounded border border-white/10">
           <button
             id="tab-workspace-btn"
             onClick={() => setActiveTab("workspace")}
-            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded text-xs font-semibold transition-all ${
               activeTab === "workspace"
-                ? "bg-slate-800 text-amber-400 shadow-sm border border-slate-700"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
+                ? "bg-orange-500 text-black shadow-md"
+                : "text-white/60 hover:text-white hover:bg-white/5"
             }`}
           >
             <Sparkles className="w-4 h-4" />
             <span>Photo Studio</span>
             {photosCount > 0 && (
-              <span className="ml-1 px-1.5 py-0.2 text-[10px] bg-amber-500/20 text-amber-300 rounded-full">
+              <span className={`ml-1 px-1.5 py-0.2 text-[10px] rounded font-mono ${
+                activeTab === "workspace" ? "bg-black/20 text-black font-bold" : "bg-orange-500/20 text-orange-300"
+              }`}>
                 {photosCount}
               </span>
             )}
@@ -65,13 +67,14 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             id="tab-python-code-btn"
             onClick={() => setActiveTab("python-code")}
-            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded text-xs font-semibold transition-all ${
               activeTab === "python-code"
-                ? "bg-slate-800 text-amber-400 shadow-sm border border-slate-700"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
+                ? "bg-orange-500 text-black shadow-md"
+                : "text-white/80 hover:text-white bg-white/10 hover:bg-white/20 border border-white/20"
             }`}
+            title="Switch to Python 3.10+ Architecture Code View"
           >
-            <Code2 className="w-4 h-4" />
+            <Code2 className="w-4 h-4 text-orange-400 group-hover:text-black" />
             <span>Python Engine Code</span>
           </button>
         </div>
@@ -83,17 +86,17 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 id="header-run-sim-btn"
                 onClick={onRunPythonSim}
-                className="hidden md:flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition"
+                className="hidden md:flex items-center space-x-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 text-white/80 text-xs font-medium rounded border border-white/10 transition"
                 title="Simulate Python Pipeline Execution"
               >
-                <Play className="w-3.5 h-3.5 text-amber-400" />
+                <Play className="w-3.5 h-3.5 text-orange-400" />
                 <span>Simulate Engine</span>
               </button>
 
               <button
                 id="header-export-btn"
                 onClick={onOpenExporter}
-                className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-slate-950 font-semibold text-xs rounded-lg shadow-md transition"
+                className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-orange-500 hover:bg-orange-600 text-black font-semibold text-xs rounded shadow transition"
               >
                 <Download className="w-4 h-4" />
                 <span>Batch Export</span>
@@ -103,7 +106,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="header-download-python-zip"
               onClick={onDownloadPythonZip}
-              className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold text-xs rounded-lg shadow-md transition"
+              className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-orange-500 hover:bg-orange-600 text-black font-semibold text-xs rounded shadow transition"
             >
               <FolderDown className="w-4 h-4" />
               <span>Download Python Code (.zip)</span>
